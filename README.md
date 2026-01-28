@@ -40,7 +40,7 @@ The characteristic supports:
 
 1. Copy the single-file server to the device:
    ```bash
-   scp ble_server.py monarch@<YOUR_INTERCOM_IP_ADDRESS>:/home/monarch/
+   scp ble_server_basic.py monarch@<YOUR_INTERCOM_IP_ADDRESS>:/home/monarch/
    ```
 
 2. Install the dependency (one-time):
