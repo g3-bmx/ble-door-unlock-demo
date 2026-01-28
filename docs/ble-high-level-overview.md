@@ -33,28 +33,47 @@ Mobile application checks BLE access tool expiration and refreshes if needed
 --------------------------------------------------------
 Monarch Intercom | Advertising
 --------------------------------------------------------
-Intercom embedded BLE service advertises in iBeacon format
-for mobile application to scan and recognize a particular intercom
+Intercom embedded BLE service advertises for mobile application
+to scan and recognize a particular intercom.
 --------------------------------------------------------
-... ? ...
+1. Intercom starts BLE advertising on boot (or after cache refresh)
+2. Advertising packet includes the Door Access Service UUID (0x1234)
+3. Mobile applications can scan for this UUID to discover nearby intercoms
+4. Advertising continues until a mobile device connects
 
 
 --------------------------------------------------------
 Mobile Application | BLE Connection Start
 --------------------------------------------------------
-Mobile application scans for intercom advertising (iBeacon)
-and attempts to connect to the intercom
+Mobile application scans for intercom advertising
+and attempts to connect to the intercom.
 --------------------------------------------------------
-... ? ...
-
+1. Mobile application scans for BLE peripherals advertising Door Access Service UUID
+2. Mobile discovers nearby intercom and initiates connection
+3. Mobile negotiates MTU (request 247+ bytes for larger payloads)
+4. Mobile discovers GATT services and characteristics
+5. Mobile subscribes to Response characteristic (indications)
+6. Mobile subscribes to Challenge characteristic (notifications)
+7. Intercom generates a fresh nonce and sends it via notification
+	- See ble-service-door-unlock.md for GATT service/characteristic details
 
 
 --------------------------------------------------------
 Mobile Application | BLE Door Unlock Request
 --------------------------------------------------------
 Mobile application connected successfully to intercom through BLE.
-Mobile application sends an unlock request to embeded BLE service and that's passed through to Monarch.
-Monarch receives door unlock payload, parses it and determines whether release the door.
-Monarch / embeded service will send a response back to mobile app for success / failure result.
+Mobile application sends an unlock request to embedded BLE service and that's passed through to Monarch.
+Monarch receives door unlock payload, parses it and determines whether to release the door.
+Monarch / embedded service will send a response back to mobile app for success / failure result.
 --------------------------------------------------------
-... ? ...
+1. Mobile receives challenge nonce from intercom
+2. Mobile computes shared secret using ECDH (mobile private key + intercom public key)
+3. Mobile derives session keys from shared secret + nonce
+4. Mobile encrypts unlock request payload (AES-GCM) and writes to Auth characteristic
+5. Intercom decrypts and verifies:
+	- derives same shared secret using ECDH (intercom private key + mobile public key)
+	- decrypts payload
+	- validates credential (expiration, revocation, allowlist)
+6. Intercom encrypts response and sends via Response characteristic (indication)
+7. Mobile decrypts response and displays result (success / failure)
+	- See ble-service-door-unlock.md for detailed protocol and message formats
