@@ -62,6 +62,10 @@ The characteristic supports:
 
 ### Observability
 
+Once the GATT server is running (either locally / intercom), you can view the BLE advertising
+through a mobile app called "nRF connect". That app listens to all BLE advertising and allows 
+you to connect and explore the GATT services and characteristics that we are working on.
+
 #### Using nRF Connect
 
 [nRF Connect](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-mobile) is a mobile app (iOS/Android) for scanning and interacting with BLE peripherals. Use it to verify the GATT server is advertising and functioning correctly.
