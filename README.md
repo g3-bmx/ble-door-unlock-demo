@@ -60,7 +60,7 @@ The characteristic supports:
 
 > **Requirements:** BlueZ 5.43+ and D-Bus. The intercom runs BlueZ 5.64.
 
-### Observability
+## Observability
 
 Once the GATT server is running (either locally / intercom), you can view the BLE advertising
 through a mobile app called "nRF connect". That app listens to all BLE advertising and allows 
