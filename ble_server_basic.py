@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
 BLE GATT Server - Single-file version for easy deployment.
+This BLE GATT server advertises a characteristic that can be read and written into.
+It logs whatever it gets written to it.
 
 Usage:
     python3 ble_server.py          # Run with default logging
