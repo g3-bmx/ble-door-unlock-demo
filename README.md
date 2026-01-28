@@ -59,3 +59,31 @@ The characteristic supports:
    ```
 
 > **Requirements:** BlueZ 5.43+ and D-Bus. The intercom runs BlueZ 5.64.
+
+### Observability
+
+#### Using nRF Connect
+
+[nRF Connect](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-mobile) is a mobile app (iOS/Android) for scanning and interacting with BLE peripherals. Use it to verify the GATT server is advertising and functioning correctly.
+
+**Scanning for the device:**
+1. Open nRF Connect and tap "Scan"
+2. Look for a device named **"Intercom"** in the scan results
+3. The device will show as connectable with the service UUID `E7B2C021-5D07-4D0B-9C20-223488C8B012`
+
+**Connecting and exploring services:**
+1. Tap "Connect" on the Intercom device
+2. Once connected, the app will discover services automatically
+3. Expand the service with UUID `E7B2C021-5D07-4D0B-9C20-223488C8B012`
+4. You'll see the characteristic `E7B2C021-5D07-4D0B-9C20-223488C8B013` with Read/Write properties
+
+**Testing read/write:**
+1. Tap the **down arrow** icon to read the current characteristic value
+2. Tap the **up arrow** icon to write data to the characteristic
+3. Select "Text" format and enter a test message (e.g., "Hello")
+4. Tap "Send" — the server terminal will log the received data
+
+**Troubleshooting:**
+- If the device doesn't appear, ensure the BLE server is running and Bluetooth is enabled
+- On macOS, ensure Bluetooth permissions were granted to the terminal
+- Try toggling Bluetooth off/on or restarting the scan
