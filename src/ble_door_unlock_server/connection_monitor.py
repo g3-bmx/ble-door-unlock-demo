@@ -16,12 +16,13 @@ class BLEServer(Protocol):
 
 
 class ConnectionMonitor:
-    """Monitors BLE connection status and triggers callbacks on disconnect."""
+    """Monitors BLE connection status and triggers callbacks on connect/disconnect."""
 
     def __init__(
         self,
         server: BLEServer,
         on_disconnect: Callable[[], None],
+        on_connect: Callable[[], None] | None = None,
         poll_interval: float = 1.0,
     ):
         """Initialize the connection monitor.
@@ -29,10 +30,12 @@ class ConnectionMonitor:
         Args:
             server: BLE server instance with is_connected() method
             on_disconnect: Callback to invoke when a client disconnects
+            on_connect: Callback to invoke when a client connects
             poll_interval: How often to check connection status (seconds)
         """
         self._server = server
         self._on_disconnect = on_disconnect
+        self._on_connect = on_connect
         self._poll_interval = poll_interval
         self._task: asyncio.Task | None = None
         self._running = False
@@ -70,6 +73,8 @@ class ConnectionMonitor:
                 # Detect connect: was not connected, now connected
                 if not self._was_connected and is_connected:
                     logger.info("Client connected")
+                    if self._on_connect:
+                        self._on_connect()
 
                 # Detect disconnect: was connected, now not connected
                 if self._was_connected and not is_connected:

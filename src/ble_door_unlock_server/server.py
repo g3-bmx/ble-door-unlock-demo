@@ -13,6 +13,9 @@ from .connection_monitor import ConnectionMonitor
 
 logger = logging.getLogger(__name__)
 
+# Enable debug logging for bless library
+logging.getLogger("bless").setLevel(logging.DEBUG)
+
 # Door Access Service UUID
 SERVICE_UUID = "12340000-1234-5678-9ABC-DEF012345678"
 
@@ -80,6 +83,13 @@ class IntercomGattServer:
 
         self._nonce_timeout_task = asyncio.create_task(timeout_task())
 
+    def _on_client_connect(self) -> None:
+        """Handle client connection by generating and sending a nonce."""
+        logger.info("[CONNECT] Client connected, generating nonce")
+        self._generate_nonce()
+        asyncio.create_task(self._start_nonce_timeout())
+        asyncio.create_task(self._send_challenge_notification())
+
     def _on_client_disconnect(self) -> None:
         """Handle client disconnection by clearing the nonce."""
         logger.info("Client disconnected, clearing nonce")
@@ -98,17 +108,28 @@ class IntercomGattServer:
 
     async def _send_challenge_notification(self) -> None:
         """Send the current nonce as a notification."""
+        logger.info(f"[NOTIFY] Attempting to send notification, server={self.server is not None}, nonce_state={self._nonce_state is not None}")
         if not self.server or not self._nonce_state:
+            logger.warning("[NOTIFY] Cannot send - server or nonce_state is None")
             return
 
         nonce = self._nonce_state.value
-        self.server.get_characteristic(CHALLENGE_CHAR_UUID).value = bytearray(nonce)
-        await self.server.update_value(SERVICE_UUID, CHALLENGE_CHAR_UUID)
-        logger.info(f"Sent nonce notification: {nonce.hex()}")
+        char = self.server.get_characteristic(CHALLENGE_CHAR_UUID)
+        logger.info(f"[NOTIFY] Got characteristic: {char}, uuid={CHALLENGE_CHAR_UUID}")
+        if char:
+            char.value = bytearray(nonce)
+            logger.info(f"[NOTIFY] Set characteristic value to: {nonce.hex()}")
+            result = self.server.update_value(SERVICE_UUID, CHALLENGE_CHAR_UUID)
+            # Handle both sync (BlueZ) and async (CoreBluetooth) backends
+            if asyncio.iscoroutine(result):
+                result = await result
+            logger.info(f"[NOTIFY] update_value result: {result}")
+        else:
+            logger.error(f"[NOTIFY] Could not find characteristic {CHALLENGE_CHAR_UUID}")
 
     def _on_read(self, characteristic: BlessGATTCharacteristic, **kwargs) -> bytearray:
         """Handle read requests."""
-        logger.debug(f"Read request for {characteristic.uuid}")
+        logger.info(f"[READ] characteristic={characteristic.uuid} kwargs={kwargs}")
 
         # Handle Challenge characteristic read
         char_uuid = str(characteristic.uuid).upper()
@@ -124,30 +145,32 @@ class IntercomGattServer:
 
     def _on_write(self, characteristic: BlessGATTCharacteristic, value: Any, **kwargs) -> None:
         """Handle write requests."""
-        logger.debug(f"Write request for {characteristic.uuid}: {value}")
+        logger.info(f"[WRITE] characteristic={characteristic.uuid} value={value} kwargs={kwargs}")
 
-    def _on_subscribe(self, characteristic: BlessGATTCharacteristic, subscribed: bool, **kwargs) -> None:
+    def _on_subscribe(self, characteristic: BlessGATTCharacteristic, **kwargs) -> None:
         """Handle subscription changes (notifications/indications)."""
         char_uuid = str(characteristic.uuid).upper()
-        logger.info(f"Subscription change for {characteristic.uuid}: subscribed={subscribed}")
+        logger.info(f"[SUBSCRIBE] characteristic={characteristic.uuid} kwargs={kwargs}")
 
         # Handle Challenge characteristic subscription
         if CHALLENGE_CHAR_UUID.upper() in char_uuid or char_uuid in CHALLENGE_CHAR_UUID.upper():
-            if subscribed:
-                logger.info("Client subscribed to challenge characteristic")
-                # Generate fresh nonce for this connection and send it
-                self._generate_nonce()
-                asyncio.create_task(self._start_nonce_timeout())
-                asyncio.create_task(self._send_challenge_notification())
+            logger.info("Client subscribed to challenge characteristic")
+            # Generate fresh nonce for this connection and send it
+            self._generate_nonce()
+            asyncio.create_task(self._start_nonce_timeout())
+            asyncio.create_task(self._send_challenge_notification())
 
     async def start(self) -> None:
         """Start the GATT server and begin advertising."""
         logger.info(f"Starting GATT server: {self.name}")
 
-        self.server = BlessServer(name=self.name, loop=asyncio.get_event_loop())
-        self.server.read_request_func = self._on_read
-        self.server.write_request_func = self._on_write
-        self.server.on_subscribe = self._on_subscribe
+        self.server = BlessServer(
+            name=self.name,
+            loop=asyncio.get_event_loop(),
+            on_read=self._on_read,
+            on_write=self._on_write,
+            on_subscribe=self._on_subscribe,
+        )
 
         await self.server.add_new_service(SERVICE_UUID)
 
@@ -161,13 +184,29 @@ class IntercomGattServer:
             GATTAttributePermissions.readable,
         )
 
+        # Set subscription callback on the characteristic directly
+        challenge_char = self.server.get_characteristic(CHALLENGE_CHAR_UUID)
+        logger.info(f"[SETUP] Got challenge characteristic: {challenge_char}")
+        if challenge_char:
+            challenge_char.on_subscribe = self._on_subscribe
+            logger.info(f"[SETUP] Set on_subscribe callback on challenge characteristic")
+            logger.info(f"[SETUP] Characteristic properties: {challenge_char.properties}")
+            logger.info(f"[SETUP] Characteristic on_subscribe: {challenge_char.on_subscribe}")
+        else:
+            logger.error(f"[SETUP] Could not find challenge characteristic!")
+
+        logger.info(f"[SETUP] Starting server...")
         await self.server.start()
+        logger.info(f"[SETUP] Server started")
         self._running = True
 
-        # Start connection monitor to detect disconnects
+        # Start connection monitor to detect connects and disconnects
+        # Use faster polling (0.25s) to quickly detect connections
         self._connection_monitor = ConnectionMonitor(
             server=self.server,
             on_disconnect=self._on_client_disconnect,
+            on_connect=self._on_client_connect,
+            poll_interval=0.25,
         )
         await self._connection_monitor.start()
 
