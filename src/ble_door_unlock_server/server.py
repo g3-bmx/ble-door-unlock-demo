@@ -9,6 +9,8 @@ from typing import Any
 
 from bless import BlessServer, BlessGATTCharacteristic, GATTCharacteristicProperties, GATTAttributePermissions
 
+from .connection_monitor import ConnectionMonitor
+
 logger = logging.getLogger(__name__)
 
 # Door Access Service UUID
@@ -46,6 +48,7 @@ class IntercomGattServer:
         self._running = False
         self._nonce_state: NonceState | None = None
         self._nonce_timeout_task: asyncio.Task | None = None
+        self._connection_monitor: ConnectionMonitor | None = None
 
     def _generate_nonce(self) -> bytes:
         """Generate a fresh 16-byte cryptographic nonce."""
@@ -76,6 +79,22 @@ class IntercomGattServer:
                 self._invalidate_nonce()
 
         self._nonce_timeout_task = asyncio.create_task(timeout_task())
+
+    def _on_client_disconnect(self) -> None:
+        """Handle client disconnection by clearing the nonce."""
+        logger.info("Client disconnected, clearing nonce")
+        self._clear_nonce()
+
+    def _clear_nonce(self) -> None:
+        """Clear the current nonce (on disconnect)."""
+        if self._nonce_state:
+            logger.info(f"Clearing nonce: {self._nonce_state.value.hex()}")
+            self._nonce_state = None
+
+        # Cancel the timeout task since nonce is cleared
+        if self._nonce_timeout_task:
+            self._nonce_timeout_task.cancel()
+            self._nonce_timeout_task = None
 
     async def _send_challenge_notification(self) -> None:
         """Send the current nonce as a notification."""
@@ -116,34 +135,41 @@ class IntercomGattServer:
         if CHALLENGE_CHAR_UUID.upper() in char_uuid or char_uuid in CHALLENGE_CHAR_UUID.upper():
             if subscribed:
                 logger.info("Client subscribed to challenge characteristic")
-                # Send nonce notification when client subscribes
+                # Generate fresh nonce for this connection and send it
+                self._generate_nonce()
+                asyncio.create_task(self._start_nonce_timeout())
                 asyncio.create_task(self._send_challenge_notification())
 
     async def start(self) -> None:
         """Start the GATT server and begin advertising."""
         logger.info(f"Starting GATT server: {self.name}")
 
-        # Generate initial nonce
-        self._generate_nonce()
-        await self._start_nonce_timeout()
-
         self.server = BlessServer(name=self.name, loop=asyncio.get_event_loop())
         self.server.read_request_func = self._on_read
         self.server.write_request_func = self._on_write
+        self.server.on_subscribe = self._on_subscribe
 
         await self.server.add_new_service(SERVICE_UUID)
 
         # Challenge Characteristic (Read, Notify)
+        # Initial value is zeros - real nonce is generated when client subscribes
         await self.server.add_new_characteristic(
             SERVICE_UUID,
             CHALLENGE_CHAR_UUID,
             GATTCharacteristicProperties.read | GATTCharacteristicProperties.notify,
-            bytearray(self._nonce_state.value) if self._nonce_state else bytearray(16),
+            bytearray(16),
             GATTAttributePermissions.readable,
         )
 
         await self.server.start()
         self._running = True
+
+        # Start connection monitor to detect disconnects
+        self._connection_monitor = ConnectionMonitor(
+            server=self.server,
+            on_disconnect=self._on_client_disconnect,
+        )
+        await self._connection_monitor.start()
 
         logger.info("GATT server started")
         logger.info(f"  Service UUID: {SERVICE_UUID}")
@@ -151,6 +177,12 @@ class IntercomGattServer:
 
     async def stop(self) -> None:
         """Stop the GATT server."""
+        self._running = False
+
+        # Stop connection monitor
+        if self._connection_monitor:
+            await self._connection_monitor.stop()
+
         # Cancel nonce timeout task
         if self._nonce_timeout_task:
             self._nonce_timeout_task.cancel()
@@ -159,9 +191,8 @@ class IntercomGattServer:
             except asyncio.CancelledError:
                 pass
 
-        if self.server and self._running:
+        if self.server:
             await self.server.stop()
-            self._running = False
             logger.info("GATT server stopped")
 
     @property
