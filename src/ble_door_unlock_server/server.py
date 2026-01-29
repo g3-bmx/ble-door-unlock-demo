@@ -25,6 +25,21 @@ CHALLENGE_CHAR_UUID = "12340000-1234-5678-9ABC-DEF012345235"
 # Nonce timeout in seconds
 NONCE_TIMEOUT_SECONDS = 30
 
+# -----------------------------------------------------------------
+# Server public/private key pair. Hardcoding for demo purposes!
+# -----------------------------------------------------------------
+SERVER_PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAs9bGEW7mCKAwC8Zzu51nVeGNcgvtRUpe/4P9qCyH6ns=
+-----END PUBLIC KEY-----
+"""
+
+SERVER_PRIVATE_KEY_PEM = b"""-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIBSMFFtpYj6Q0hKz09rn/8Z/9o+OQ0ppC+AogwlcRBIz
+-----END PRIVATE KEY-----
+"""
+
+
+
 
 @dataclass
 class NonceState:

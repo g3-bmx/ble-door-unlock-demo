@@ -14,6 +14,19 @@ SERVICE_UUID = "12340000-1234-5678-9ABC-DEF012345678"
 # Challenge Characteristic - receives nonce from server
 CHALLENGE_CHAR_UUID = "12340000-1234-5678-9ABC-DEF012345235"
 
+# -----------------------------------------------------------------
+# Client public/private key pair. Hardcoding for demo purposes!
+# -----------------------------------------------------------------
+CLIENT_PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAJGuguvPqLj68i6omk5KGOmPOONqotufeQRAgh6UccnE=
+-----END PUBLIC KEY-----
+"""
+
+CLIENT_PRIVATE_KEY_PEM = b"""-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIPn3kRox+MbIxWFWcLxbwBGbLjC9HfT4pGLQrWSCxMRj
+-----END PRIVATE KEY-----
+"""
+
 
 class IntercomClient:
     """BLE client that simulates a mobile device connecting to the Intercom GATT server."""

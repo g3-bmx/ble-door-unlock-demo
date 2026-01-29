@@ -9,6 +9,7 @@ description = "BLE GATT server for door unlock POC"
 requires-python = ">=3.10"
 dependencies = [
     "bless>=0.2.5",
+    "cryptography>=46.0.4",
 ]
 
 [project.optional-dependencies]
