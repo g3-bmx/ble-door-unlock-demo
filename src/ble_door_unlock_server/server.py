@@ -45,14 +45,15 @@ MC4CAQAwBQYDK2VwBCIEIBSMFFtpYj6Q0hKz09rn/8Z/9o+OQ0ppC+AogwlcRBIz
 
 # -----------------------------------------------------------------
 # Client public key - used to verify client signatures
-# In production, this would be registered during device pairing
+# In production, this would be registered during device pairing.
+# Provided by the backend to Monarch, and kept in keychain for storage.
+# Unsure if Monarch needs to provide a list of public keys to embedded
+# or if embedded will be able to fetch from the keychain created by monarch.
 # -----------------------------------------------------------------
 CLIENT_PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAJGuguvPqLj68i6omk5KGOmPOONqotufeQRAgh6UccnE=
 -----END PUBLIC KEY-----
 """
-
-
 
 
 @dataclass
