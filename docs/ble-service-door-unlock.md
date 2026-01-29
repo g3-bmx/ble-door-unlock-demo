@@ -130,7 +130,7 @@ Protocol flow mapped to GATT operations:
         ├── Response Characteristic
         │	Purpose: Intercom sends encrypted result back to mobile
         │   UUID: 0x1237
-        │   Properties: Indicate
+        │   Properties: Indicate | client can subscribe to characteristic, but must acknowledge messages
         │	Permissions: Open
         │   Value: up to 256 bytes (encrypted response)
         │	Note: You will need to negotiate the maximum packet size on connection (MTU)
