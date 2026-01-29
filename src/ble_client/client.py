@@ -1,18 +1,18 @@
 """BLE Client implementation using bleak to simulate a mobile device."""
 
 import asyncio
-import json
 import logging
-from typing import Callable
 
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
 
 logger = logging.getLogger(__name__)
 
-# UUIDs matching the GATT server
-SERVICE_UUID = "E7B2C021-5D07-4D0B-9C20-223488C8B012"
-CHAR_UUID = "E7B2C021-5D07-4D0B-9C20-223488C8B013"
+# Door Access Service UUID
+SERVICE_UUID = "12340000-1234-5678-9ABC-DEF012345678"
+
+# Challenge Characteristic - receives nonce from server
+CHALLENGE_CHAR_UUID = "12340000-1234-5678-9ABC-DEF012345235"
 
 
 class IntercomClient:
@@ -22,6 +22,8 @@ class IntercomClient:
         self.device_name = device_name
         self.client: BleakClient | None = None
         self.device: BLEDevice | None = None
+        self.challenge_nonce: bytes | None = None
+        self._challenge_received: asyncio.Event = asyncio.Event()
 
     async def scan(self, timeout: float = 10.0) -> BLEDevice | None:
         """Scan for the target device by name."""
@@ -60,62 +62,73 @@ class IntercomClient:
         if self.client and self.client.is_connected:
             await self.client.disconnect()
             logger.info("Disconnected")
+        # Reset challenge state
+        self.challenge_nonce = None
+        self._challenge_received.clear()
 
-    async def write(self, data: bytes | str | dict) -> bool:
-        """Write data to the characteristic.
+    async def subscribe_to_challenge(self) -> bool:
+        """Subscribe to the challenge characteristic to receive the nonce."""
+        if not self.client or not self.client.is_connected:
+            logger.error("Not connected to device")
+            return False
+
+        def challenge_handler(sender, data: bytearray):
+            """Handle incoming challenge nonce notification."""
+            self.challenge_nonce = bytes(data)
+            logger.info(f"Received challenge nonce: {self.challenge_nonce.hex()} ({len(self.challenge_nonce)} bytes)")
+            self._challenge_received.set()
+
+        try:
+            await self.client.start_notify(CHALLENGE_CHAR_UUID, challenge_handler)
+            logger.info("Subscribed to challenge characteristic")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to subscribe to challenge: {e}")
+            return False
+
+    async def wait_for_challenge(self, timeout: float = 10.0) -> bytes | None:
+        """Wait for the challenge nonce to be received.
 
         Args:
-            data: Can be bytes, a string, or a dict (will be JSON-encoded)
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            The challenge nonce if received, None if timeout
         """
-        if not self.client or not self.client.is_connected:
-            logger.error("Not connected to device")
-            return False
-
-        # Convert data to bytes
-        if isinstance(data, dict):
-            data = json.dumps(data).encode("utf-8")
-        elif isinstance(data, str):
-            data = data.encode("utf-8")
-
         try:
-            await self.client.write_gatt_char(CHAR_UUID, data)
-            logger.info(f"Sent: {data}")
-            return True
-        except Exception as e:
-            logger.error(f"Write failed: {e}")
-            return False
+            await asyncio.wait_for(self._challenge_received.wait(), timeout=timeout)
+            return self.challenge_nonce
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout waiting for challenge nonce ({timeout}s)")
+            return None
 
-    async def read(self) -> bytes | None:
-        """Read data from the characteristic."""
+    async def get_challenge(self, timeout: float = 10.0) -> bytes | None:
+        """Subscribe to challenge and wait for the nonce.
+
+        This is a convenience method that combines subscribe_to_challenge()
+        and wait_for_challenge().
+
+        Returns:
+            The 16-byte challenge nonce, or None if failed
+        """
+        if not await self.subscribe_to_challenge():
+            return None
+        return await self.wait_for_challenge(timeout=timeout)
+
+    async def read_challenge(self) -> bytes | None:
+        """Read the challenge nonce directly (alternative to notifications)."""
         if not self.client or not self.client.is_connected:
             logger.error("Not connected to device")
             return None
 
         try:
-            data = await self.client.read_gatt_char(CHAR_UUID)
-            logger.info(f"Received: {data}")
-            return data
+            data = await self.client.read_gatt_char(CHALLENGE_CHAR_UUID)
+            self.challenge_nonce = bytes(data)
+            logger.info(f"Read challenge nonce: {self.challenge_nonce.hex()} ({len(self.challenge_nonce)} bytes)")
+            return self.challenge_nonce
         except Exception as e:
-            logger.error(f"Read failed: {e}")
+            logger.error(f"Failed to read challenge: {e}")
             return None
-
-    async def subscribe(self, callback: Callable[[bytes], None]) -> bool:
-        """Subscribe to notifications from the characteristic."""
-        if not self.client or not self.client.is_connected:
-            logger.error("Not connected to device")
-            return False
-
-        def notification_handler(sender, data: bytearray):
-            logger.debug(f"Notification from {sender}: {data}")
-            callback(bytes(data))
-
-        try:
-            await self.client.start_notify(CHAR_UUID, notification_handler)
-            logger.info("Subscribed to notifications")
-            return True
-        except Exception as e:
-            logger.error(f"Subscribe failed: {e}")
-            return False
 
     async def __aenter__(self):
         """Async context manager entry."""

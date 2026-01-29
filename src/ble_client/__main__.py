@@ -21,8 +21,8 @@ async def cmd_scan(args: argparse.Namespace) -> int:
     return 0
 
 
-async def cmd_connect(args: argparse.Namespace) -> int:
-    """Connect to the Intercom and optionally send data."""
+async def cmd_challenge(args: argparse.Namespace) -> int:
+    """Connect to the Intercom and receive the challenge nonce."""
     client = IntercomClient(device_name=args.name)
 
     device = await client.scan(timeout=args.timeout)
@@ -35,43 +35,48 @@ async def cmd_connect(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        if args.message:
-            success = await client.write(args.message)
-            if not success:
-                return 1
+        print("Subscribing to challenge characteristic...")
+        nonce = await client.get_challenge(timeout=args.challenge_timeout)
 
-        if args.interactive:
-            print("\nInteractive mode. Type messages to send (Ctrl+C to exit):")
-            while True:
-                try:
-                    message = input("> ")
-                    if message:
-                        await client.write(message)
-                except KeyboardInterrupt:
-                    print("\nExiting...")
-                    break
+        if nonce:
+            print(f"\nChallenge nonce received:")
+            print(f"  Hex: {nonce.hex()}")
+            print(f"  Length: {len(nonce)} bytes")
+            return 0
+        else:
+            print("Failed to receive challenge nonce")
+            return 1
     finally:
         await client.disconnect()
 
-    return 0
 
+async def cmd_read_challenge(args: argparse.Namespace) -> int:
+    """Connect and read the challenge nonce directly (without notifications)."""
+    client = IntercomClient(device_name=args.name)
 
-async def cmd_unlock(args: argparse.Namespace) -> int:
-    """Send an unlock command to the Intercom."""
-    async with IntercomClient(device_name=args.name) as client:
-        if not client.client or not client.client.is_connected:
-            print(f"Failed to connect to '{args.name}'")
-            return 1
+    device = await client.scan(timeout=args.timeout)
+    if not device:
+        print(f"Device '{args.name}' not found")
+        return 1
 
-        payload = {"action": "unlock"}
-        success = await client.write(payload)
+    if not await client.connect():
+        print("Failed to connect")
+        return 1
 
-        if success:
-            print("Unlock command sent successfully")
+    try:
+        print("Reading challenge characteristic...")
+        nonce = await client.read_challenge()
+
+        if nonce:
+            print(f"\nChallenge nonce read:")
+            print(f"  Hex: {nonce.hex()}")
+            print(f"  Length: {len(nonce)} bytes")
             return 0
         else:
-            print("Failed to send unlock command")
+            print("Failed to read challenge nonce")
             return 1
+    finally:
+        await client.disconnect()
 
 
 def main() -> int:
@@ -95,35 +100,44 @@ def main() -> int:
         help="Scan timeout in seconds (default: 10)",
     )
 
-    # Connect command
-    connect_parser = subparsers.add_parser("connect", help="Connect to the Intercom")
-    connect_parser.add_argument(
+    # Challenge command (subscribe to notifications)
+    challenge_parser = subparsers.add_parser(
+        "challenge",
+        help="Connect and receive challenge nonce via notification"
+    )
+    challenge_parser.add_argument(
         "-n", "--name",
         default="Intercom",
         help="Device name to connect to (default: Intercom)",
     )
-    connect_parser.add_argument(
+    challenge_parser.add_argument(
         "-t", "--timeout",
         type=float,
         default=10.0,
         help="Scan timeout in seconds (default: 10)",
     )
-    connect_parser.add_argument(
-        "-m", "--message",
-        help="Message to send after connecting",
-    )
-    connect_parser.add_argument(
-        "-i", "--interactive",
-        action="store_true",
-        help="Enter interactive mode to send multiple messages",
+    challenge_parser.add_argument(
+        "--challenge-timeout",
+        type=float,
+        default=10.0,
+        help="Timeout waiting for challenge nonce (default: 10)",
     )
 
-    # Unlock command
-    unlock_parser = subparsers.add_parser("unlock", help="Send unlock command")
-    unlock_parser.add_argument(
+    # Read challenge command (direct read)
+    read_parser = subparsers.add_parser(
+        "read-challenge",
+        help="Connect and read challenge nonce directly"
+    )
+    read_parser.add_argument(
         "-n", "--name",
         default="Intercom",
         help="Device name to connect to (default: Intercom)",
+    )
+    read_parser.add_argument(
+        "-t", "--timeout",
+        type=float,
+        default=10.0,
+        help="Scan timeout in seconds (default: 10)",
     )
 
     args = parser.parse_args()
@@ -133,10 +147,10 @@ def main() -> int:
 
     if args.command == "scan":
         return asyncio.run(cmd_scan(args))
-    elif args.command == "connect":
-        return asyncio.run(cmd_connect(args))
-    elif args.command == "unlock":
-        return asyncio.run(cmd_unlock(args))
+    elif args.command == "challenge":
+        return asyncio.run(cmd_challenge(args))
+    elif args.command == "read-challenge":
+        return asyncio.run(cmd_read_challenge(args))
     else:
         parser.print_help()
         return 0
