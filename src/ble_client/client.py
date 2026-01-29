@@ -5,6 +5,7 @@ import logging
 
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,9 @@ SERVICE_UUID = "12340000-1234-5678-9ABC-DEF012345678"
 
 # Challenge Characteristic - receives nonce from server
 CHALLENGE_CHAR_UUID = "12340000-1234-5678-9ABC-DEF012345235"
+
+# Response Characteristic - sends signed nonce to server
+RESPONSE_CHAR_UUID = "12340000-1234-5678-9ABC-DEF012345236"
 
 # -----------------------------------------------------------------
 # Client public/private key pair. Hardcoding for demo purposes!
@@ -142,6 +146,87 @@ class IntercomClient:
         except Exception as e:
             logger.error(f"Failed to read challenge: {e}")
             return None
+
+    def sign_challenge(self, nonce: bytes) -> bytes:
+        """Sign the challenge nonce with the client's private key.
+
+        Args:
+            nonce: The challenge nonce received from the server
+
+        Returns:
+            The Ed25519 signature (64 bytes)
+        """
+        logger.info(f"[AUTH] Signing nonce: {nonce.hex()}")
+
+        # Load the private key
+        private_key = load_pem_private_key(CLIENT_PRIVATE_KEY_PEM, password=None)
+
+        # Sign the nonce
+        signature = private_key.sign(nonce)
+        logger.info(f"[AUTH] Generated signature: {signature.hex()} ({len(signature)} bytes)")
+
+        return signature
+
+    async def send_response(self, signature: bytes) -> bool:
+        """Send the signed response to the server.
+
+        Args:
+            signature: The Ed25519 signature of the challenge nonce
+
+        Returns:
+            True if write succeeded, False otherwise
+        """
+        if not self.client or not self.client.is_connected:
+            logger.error("Not connected to device")
+            return False
+
+        try:
+            logger.info(f"[AUTH] Writing signature to response characteristic...")
+            await self.client.write_gatt_char(RESPONSE_CHAR_UUID, signature)
+            logger.info(f"[AUTH] Signature sent successfully")
+            return True
+        except Exception as e:
+            logger.error(f"[AUTH] Failed to send signature: {e}")
+            return False
+
+    async def authenticate(self, timeout: float = 10.0) -> bool:
+        """Perform full challenge-response authentication.
+
+        This is a convenience method that:
+        1. Subscribes to challenge notifications
+        2. Waits for the challenge nonce
+        3. Signs the nonce with the client's private key
+        4. Sends the signature to the server
+
+        Returns:
+            True if authentication completed (signature sent), False otherwise
+        """
+        logger.info("=" * 60)
+        logger.info("[AUTH] Starting challenge-response authentication...")
+        logger.info("=" * 60)
+
+        # Step 1: Get the challenge nonce
+        logger.info("[AUTH] Step 1: Waiting for challenge nonce...")
+        nonce = await self.get_challenge(timeout=timeout)
+        if not nonce:
+            logger.error("[AUTH] Failed to receive challenge nonce")
+            return False
+        logger.info(f"[AUTH] Received nonce: {nonce.hex()}")
+
+        # Step 2: Sign the nonce
+        logger.info("[AUTH] Step 2: Signing the nonce...")
+        signature = self.sign_challenge(nonce)
+
+        # Step 3: Send the signature
+        logger.info("[AUTH] Step 3: Sending signature to server...")
+        if not await self.send_response(signature):
+            logger.error("[AUTH] Failed to send signature")
+            return False
+
+        logger.info("=" * 60)
+        logger.info("[AUTH] Authentication flow completed!")
+        logger.info("=" * 60)
+        return True
 
     async def __aenter__(self):
         """Async context manager entry."""

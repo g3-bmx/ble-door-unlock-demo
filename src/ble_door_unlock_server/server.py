@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from bless import BlessServer, BlessGATTCharacteristic, GATTCharacteristicProperties, GATTAttributePermissions
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.exceptions import InvalidSignature
 
 from .connection_monitor import ConnectionMonitor
 
@@ -21,6 +23,9 @@ SERVICE_UUID = "12340000-1234-5678-9ABC-DEF012345678"
 
 # Challenge Characteristic - provides fresh nonce for each connection
 CHALLENGE_CHAR_UUID = "12340000-1234-5678-9ABC-DEF012345235"
+
+# Response Characteristic - receives signed nonce from client
+RESPONSE_CHAR_UUID = "12340000-1234-5678-9ABC-DEF012345236"
 
 # Nonce timeout in seconds
 NONCE_TIMEOUT_SECONDS = 30
@@ -36,6 +41,15 @@ MCowBQYDK2VwAyEAs9bGEW7mCKAwC8Zzu51nVeGNcgvtRUpe/4P9qCyH6ns=
 SERVER_PRIVATE_KEY_PEM = b"""-----BEGIN PRIVATE KEY-----
 MC4CAQAwBQYDK2VwBCIEIBSMFFtpYj6Q0hKz09rn/8Z/9o+OQ0ppC+AogwlcRBIz
 -----END PRIVATE KEY-----
+"""
+
+# -----------------------------------------------------------------
+# Client public key - used to verify client signatures
+# In production, this would be registered during device pairing
+# -----------------------------------------------------------------
+CLIENT_PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAJGuguvPqLj68i6omk5KGOmPOONqotufeQRAgh6UccnE=
+-----END PUBLIC KEY-----
 """
 
 
@@ -142,6 +156,51 @@ class IntercomGattServer:
         else:
             logger.error(f"[NOTIFY] Could not find characteristic {CHALLENGE_CHAR_UUID}")
 
+    def _verify_response(self, signature: bytes) -> bool:
+        """Verify the client's signature of the challenge nonce.
+
+        Args:
+            signature: The Ed25519 signature from the client
+
+        Returns:
+            True if signature is valid, False otherwise
+        """
+        # Check if we have a valid nonce to verify against
+        if not self._nonce_state:
+            logger.error("[AUTH] FAILED - No nonce state available")
+            return False
+
+        if not self._nonce_state.is_valid():
+            logger.error("[AUTH] FAILED - Nonce is expired or already used")
+            return False
+
+        nonce = self._nonce_state.value
+        logger.info(f"[AUTH] Verifying signature against nonce: {nonce.hex()}")
+
+        try:
+            # Load the client's public key
+            client_public_key = load_pem_public_key(CLIENT_PUBLIC_KEY_PEM)
+
+            # Verify the signature
+            client_public_key.verify(signature, nonce)
+
+            # Mark nonce as used (one-time use)
+            self._invalidate_nonce()
+
+            logger.info("=" * 60)
+            logger.info("[AUTH] SUCCESS - Signature verified! Access granted.")
+            logger.info("=" * 60)
+            return True
+
+        except InvalidSignature:
+            logger.error("=" * 60)
+            logger.error("[AUTH] FAILED - Invalid signature! Access denied.")
+            logger.error("=" * 60)
+            return False
+        except Exception as e:
+            logger.error(f"[AUTH] FAILED - Error during verification: {e}")
+            return False
+
     def _on_read(self, characteristic: BlessGATTCharacteristic, **kwargs) -> bytearray:
         """Handle read requests."""
         logger.info(f"[READ] characteristic={characteristic.uuid} kwargs={kwargs}")
@@ -160,7 +219,14 @@ class IntercomGattServer:
 
     def _on_write(self, characteristic: BlessGATTCharacteristic, value: Any, **kwargs) -> None:
         """Handle write requests."""
-        logger.info(f"[WRITE] characteristic={characteristic.uuid} value={value} kwargs={kwargs}")
+        char_uuid = str(characteristic.uuid).upper()
+        logger.info(f"[WRITE] characteristic={char_uuid} value_len={len(value) if value else 0} kwargs={kwargs}")
+
+        # Handle Response characteristic write (signature verification)
+        if RESPONSE_CHAR_UUID.upper() in char_uuid or char_uuid in RESPONSE_CHAR_UUID.upper():
+            signature = bytes(value) if value else b""
+            logger.info(f"[AUTH] Received signature: {signature.hex()} ({len(signature)} bytes)")
+            self._verify_response(signature)
 
     def _on_subscribe(self, characteristic: BlessGATTCharacteristic, **kwargs) -> None:
         """Handle subscription changes (notifications/indications)."""
@@ -188,16 +254,40 @@ class IntercomGattServer:
         )
 
         await self.server.add_new_service(SERVICE_UUID)
+        logger.info(f"[SETUP] Added service: {SERVICE_UUID}")
 
         # Challenge Characteristic (Read, Notify)
         # Initial value is zeros - real nonce is generated when client subscribes
+        challenge_props = GATTCharacteristicProperties.read | GATTCharacteristicProperties.notify
         await self.server.add_new_characteristic(
             SERVICE_UUID,
             CHALLENGE_CHAR_UUID,
-            GATTCharacteristicProperties.read | GATTCharacteristicProperties.notify,
+            challenge_props,
             bytearray(16),
             GATTAttributePermissions.readable,
         )
+        logger.info(f"[SETUP] Added Challenge characteristic:")
+        logger.info(f"[SETUP]   UUID: {CHALLENGE_CHAR_UUID}")
+        logger.info(f"[SETUP]   Properties: Read, Notify")
+        logger.info(f"[SETUP]   Permissions: Readable")
+        logger.info(f"[SETUP]   Initial value: 16 bytes (zeros)")
+
+        # Response Characteristic (Write)
+        # Client writes signed nonce here for verification
+        # Ed25519 signatures are 64 bytes
+        response_props = GATTCharacteristicProperties.write
+        await self.server.add_new_characteristic(
+            SERVICE_UUID,
+            RESPONSE_CHAR_UUID,
+            response_props,
+            bytearray(64),
+            GATTAttributePermissions.writeable,
+        )
+        logger.info(f"[SETUP] Added Response characteristic:")
+        logger.info(f"[SETUP]   UUID: {RESPONSE_CHAR_UUID}")
+        logger.info(f"[SETUP]   Properties: Write")
+        logger.info(f"[SETUP]   Permissions: Writeable")
+        logger.info(f"[SETUP]   Initial value: 64 bytes (zeros)")
 
         # Set subscription callback on the characteristic directly
         challenge_char = self.server.get_characteristic(CHALLENGE_CHAR_UUID)
@@ -225,9 +315,23 @@ class IntercomGattServer:
         )
         await self._connection_monitor.start()
 
-        logger.info("GATT server started")
-        logger.info(f"  Service UUID: {SERVICE_UUID}")
-        logger.info(f"  Challenge Characteristic UUID: {CHALLENGE_CHAR_UUID}")
+        logger.info("=" * 60)
+        logger.info("GATT Server Configuration Summary")
+        logger.info("=" * 60)
+        logger.info(f"Server Name: {self.name}")
+        logger.info(f"Service UUID: {SERVICE_UUID}")
+        logger.info("")
+        logger.info("Characteristics:")
+        logger.info(f"  1. Challenge (nonce)")
+        logger.info(f"     UUID: {CHALLENGE_CHAR_UUID}")
+        logger.info(f"     Properties: Read, Notify")
+        logger.info(f"     Size: 16 bytes")
+        logger.info(f"  2. Response (signature)")
+        logger.info(f"     UUID: {RESPONSE_CHAR_UUID}")
+        logger.info(f"     Properties: Write")
+        logger.info(f"     Size: 64 bytes")
+        logger.info("=" * 60)
+        logger.info("Server is ready and advertising...")
 
     async def stop(self) -> None:
         """Stop the GATT server."""

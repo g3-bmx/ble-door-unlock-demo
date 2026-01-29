@@ -79,6 +79,37 @@ async def cmd_read_challenge(args: argparse.Namespace) -> int:
         await client.disconnect()
 
 
+async def cmd_auth(args: argparse.Namespace) -> int:
+    """Perform full challenge-response authentication."""
+    client = IntercomClient(device_name=args.name)
+
+    device = await client.scan(timeout=args.timeout)
+    if not device:
+        print(f"Device '{args.name}' not found")
+        return 1
+
+    if not await client.connect():
+        print("Failed to connect")
+        return 1
+
+    try:
+        print("\n" + "=" * 60)
+        print("Starting Challenge-Response Authentication")
+        print("=" * 60)
+
+        success = await client.authenticate(timeout=args.challenge_timeout)
+
+        if success:
+            print("\n✓ Authentication flow completed!")
+            print("  Check server logs to see if signature was verified.")
+            return 0
+        else:
+            print("\n✗ Authentication failed")
+            return 1
+    finally:
+        await client.disconnect()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="BLE Client - Simulate a mobile device connecting to the GATT server"
@@ -140,6 +171,29 @@ def main() -> int:
         help="Scan timeout in seconds (default: 10)",
     )
 
+    # Auth command (full challenge-response flow)
+    auth_parser = subparsers.add_parser(
+        "auth",
+        help="Perform full challenge-response authentication"
+    )
+    auth_parser.add_argument(
+        "-n", "--name",
+        default="Intercom",
+        help="Device name to connect to (default: Intercom)",
+    )
+    auth_parser.add_argument(
+        "-t", "--timeout",
+        type=float,
+        default=10.0,
+        help="Scan timeout in seconds (default: 10)",
+    )
+    auth_parser.add_argument(
+        "--challenge-timeout",
+        type=float,
+        default=10.0,
+        help="Timeout waiting for challenge nonce (default: 10)",
+    )
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -151,6 +205,8 @@ def main() -> int:
         return asyncio.run(cmd_challenge(args))
     elif args.command == "read-challenge":
         return asyncio.run(cmd_read_challenge(args))
+    elif args.command == "auth":
+        return asyncio.run(cmd_auth(args))
     else:
         parser.print_help()
         return 0
