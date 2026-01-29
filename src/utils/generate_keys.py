@@ -6,6 +6,8 @@ Usage:
 
 This generates a matching public/private key pair that can be used for
 the challenge-response authentication flow between client and server.
+This file was run standalone to generate and copy/paste the keys for demo purposes.
+Absolutely was not meant to be used in production code. if it is, talk with someone :) 
 """
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
