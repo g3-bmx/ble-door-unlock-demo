@@ -175,26 +175,53 @@ class IntercomGattServer:
             return False
 
         nonce = self._nonce_state.value
-        logger.info(f"[AUTH] Verifying signature against nonce: {nonce.hex()}")
+
+        # Log the verification inputs for demo purposes
+        logger.info("=" * 60)
+        logger.info("[AUTH] SIGNATURE VERIFICATION")
+        logger.info("=" * 60)
+        logger.info(f"[AUTH] Original challenge (nonce):")
+        logger.info(f"[AUTH]   Hex: {nonce.hex()}")
+        logger.info(f"[AUTH]   Bytes: {len(nonce)}")
+        logger.info(f"[AUTH] Received signature:")
+        logger.info(f"[AUTH]   Hex: {signature.hex()}")
+        logger.info(f"[AUTH]   Bytes: {len(signature)}")
+        logger.info("-" * 60)
 
         try:
             # Load the client's public key
             client_public_key = load_pem_public_key(CLIENT_PUBLIC_KEY_PEM)
+            logger.info(f"[AUTH] Using client public key to verify...")
+            logger.info(f"[AUTH] Public key type: Ed25519")
 
             # Verify the signature
+            # Ed25519 verification: verify(signature, message)
+            # This checks that signature was created by signing 'nonce' with the private key
+            # corresponding to 'client_public_key'
             client_public_key.verify(signature, nonce)
 
             # Mark nonce as used (one-time use)
             self._invalidate_nonce()
 
+            logger.info("-" * 60)
+            logger.info("[AUTH] Verification result: VALID")
+            logger.info("[AUTH] The signature proves the client possesses the private key")
+            logger.info("[AUTH] corresponding to the registered public key.")
             logger.info("=" * 60)
-            logger.info("[AUTH] SUCCESS - Signature verified! Access granted.")
+            logger.info("[AUTH] SUCCESS - Access granted!")
             logger.info("=" * 60)
             return True
 
         except InvalidSignature:
+            logger.error("-" * 60)
+            logger.error("[AUTH] Verification result: INVALID")
+            logger.error("[AUTH] The signature does NOT match the nonce + public key.")
+            logger.error("[AUTH] Possible causes:")
+            logger.error("[AUTH]   - Wrong private key used to sign")
+            logger.error("[AUTH]   - Nonce was modified in transit")
+            logger.error("[AUTH]   - Replay attack with old signature")
             logger.error("=" * 60)
-            logger.error("[AUTH] FAILED - Invalid signature! Access denied.")
+            logger.error("[AUTH] FAILED - Access denied!")
             logger.error("=" * 60)
             return False
         except Exception as e:
@@ -248,10 +275,12 @@ class IntercomGattServer:
         self.server = BlessServer(
             name=self.name,
             loop=asyncio.get_event_loop(),
-            on_read=self._on_read,
-            on_write=self._on_write,
-            on_subscribe=self._on_subscribe,
         )
+
+        # Set callbacks explicitly for BlueZ backend compatibility
+        self.server.read_request_func = self._on_read
+        self.server.write_request_func = self._on_write
+        logger.info("[SETUP] Registered read/write callbacks on server")
 
         await self.server.add_new_service(SERVICE_UUID)
         logger.info(f"[SETUP] Added service: {SERVICE_UUID}")
