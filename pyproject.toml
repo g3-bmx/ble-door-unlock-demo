@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "bless>=0.2.5",
     "cryptography>=46.0.4",
+    "dbus-next>=0.2.3",
 ]
 
 [project.optional-dependencies]
@@ -20,9 +21,10 @@ dev = [
 
 [project.scripts]
 ble-server = "ble_door_unlock.main:main"
+ble-ibeacon = "ble_ibeacon_advertising.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ble_door_unlock"]
+packages = ["src/ble_door_unlock", "src/ble_ibeacon_advertising"]
 
 [tool.ruff]
 line-length = 100
