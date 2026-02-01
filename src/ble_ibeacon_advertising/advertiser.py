@@ -190,9 +190,8 @@ class IBeaconAdvertisement(ServiceInterface):
             Dictionary with Apple company ID mapped to iBeacon payload variant
         """
         payload = build_ibeacon_payload(self._config)
-        # Convert bytes to list of integers for D-Bus
-        payload_list = list(payload)
-        return {APPLE_COMPANY_ID: Variant("ay", payload_list)}
+        # dbus-next expects bytes directly for "ay" type
+        return {APPLE_COMPANY_ID: Variant("ay", payload)}
 
     @dbus_property(access=PropertyAccess.READ)
     def Type(self) -> "s":

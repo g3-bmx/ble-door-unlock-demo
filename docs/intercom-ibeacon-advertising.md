@@ -332,3 +332,90 @@ Validation Steps
 5. Test mobile app background detection (iOS/Android)
 6. Measure detection latency in foreground vs background
 --------------------------------------------------------
+
+
+--------------------------------------------------------
+Linux Hardware TX Power Ranges
+--------------------------------------------------------
+The actual TX power range supported varies by Bluetooth adapter.
+The software may request a specific dBm value, but the hardware
+will clamp to its supported range.
+
+Typical Adapter Ranges
+----------------------
+Most BLE adapters support a range similar to:
+
+| Adapter Type          | Min TX Power | Max TX Power |
+|-----------------------|--------------|--------------|
+| Typical USB dongle    | -20 dBm      | +4 dBm       |
+| Embedded UART adapter | -16 dBm      | +2 dBm       |
+| High-power module     | -20 dBm      | +8 dBm       |
+
+Note: These are examples. Always verify your specific hardware.
+
+Determining Your Adapter's TX Power Range
+-----------------------------------------
+Use hciconfig to test what values your adapter actually supports.
+The adapter will clamp requested values to its supported range.
+
+1. Check current TX power level:
+   $ hciconfig hci0 inqtpl
+
+2. Test minimum TX power:
+   $ sudo hciconfig hci0 inqtpl -- -20
+   $ hciconfig hci0 inqtpl
+   # Note: Use "--" before negative values to prevent shell parsing issues
+
+3. Test lower values to find actual minimum:
+   $ sudo hciconfig hci0 inqtpl -- -30
+   $ hciconfig hci0 inqtpl
+   # If reported value is higher than requested, that's your minimum
+
+4. Test maximum TX power:
+   $ sudo hciconfig hci0 inqtpl -- 4
+   $ hciconfig hci0 inqtpl
+
+5. Test higher values to find actual maximum:
+   $ sudo hciconfig hci0 inqtpl -- 8
+   $ hciconfig hci0 inqtpl
+   # If reported value is lower than requested, that's your maximum
+
+Example Test Results
+--------------------
+Testing an embedded UART Bluetooth adapter:
+
+| Requested | Reported | Conclusion          |
+|-----------|----------|---------------------|
+| -30 dBm   | -16 dBm  | -16 dBm is minimum  |
+| -20 dBm   | -16 dBm  | -16 dBm is minimum  |
+| +4 dBm    | +2 dBm   | +2 dBm is maximum   |
+| +8 dBm    | +2 dBm   | +2 dBm is maximum   |
+
+This adapter supports: -16 dBm to +2 dBm (18 dB dynamic range)
+
+Impact on Detection Range
+-------------------------
+For close-proximity detection, use the lowest TX power your
+hardware supports. The actual detection range depends on:
+
+| TX Power | Approximate Range | Use Case               |
+|----------|-------------------|------------------------|
+| +2 dBm   | ~15-25 meters     | Early/far detection    |
+| 0 dBm    | ~10-20 meters     | Medium range           |
+| -6 dBm   | ~5-10 meters      | Short range            |
+| -12 dBm  | ~3-6 meters       | Close proximity        |
+| -16 dBm  | ~2-4 meters       | Very close proximity   |
+
+Note: Actual range varies with environment (walls, interference,
+device orientation, humidity). These are approximate values.
+
+Recording Your Adapter's Range
+------------------------------
+After testing, document your specific adapter's capabilities:
+
+Adapter: _______________________
+Bus Type: ______________________
+Min TX Power: _________ dBm
+Max TX Power: _________ dBm
+Dynamic Range: _________ dB
+--------------------------------------------------------
