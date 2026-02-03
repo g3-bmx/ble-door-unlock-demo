@@ -48,23 +48,29 @@ class AuthRequest:
     """
     AUTH_REQUEST message (0x01).
 
-    Format: [0x01][DeviceID (16B)][IV (16B)][Enc_DK(Nonce_M) (16B)]
-    Total: 49 bytes
+    Format: [0x01][DeviceID (16B)][IV (16B)][Enc_DK(Nonce_M) (32B)]
+    Total: 65 bytes
+
+    Note: Encrypted nonce is 32 bytes because PKCS7 padding adds a full block
+    when the plaintext (16-byte nonce) is exactly one AES block.
     """
     device_id: bytes
     iv: bytes
     encrypted_nonce: bytes
 
+    # Encrypted nonce size: 16-byte nonce + 16-byte PKCS7 padding = 32 bytes
+    ENCRYPTED_NONCE_SIZE = 32
+
     @classmethod
     def parse(cls, data: bytes) -> Optional["AuthRequest"]:
         """Parse AUTH_REQUEST from raw bytes (excluding message type)."""
-        expected_size = DEVICE_ID_SIZE + IV_SIZE + NONCE_SIZE  # 48 bytes
+        expected_size = DEVICE_ID_SIZE + IV_SIZE + cls.ENCRYPTED_NONCE_SIZE  # 64 bytes
         if len(data) < expected_size:
             return None
 
         device_id = data[:DEVICE_ID_SIZE]
         iv = data[DEVICE_ID_SIZE:DEVICE_ID_SIZE + IV_SIZE]
-        encrypted_nonce = data[DEVICE_ID_SIZE + IV_SIZE:DEVICE_ID_SIZE + IV_SIZE + NONCE_SIZE]
+        encrypted_nonce = data[DEVICE_ID_SIZE + IV_SIZE:DEVICE_ID_SIZE + IV_SIZE + cls.ENCRYPTED_NONCE_SIZE]
 
         return cls(device_id=device_id, iv=iv, encrypted_nonce=encrypted_nonce)
 
@@ -74,8 +80,11 @@ class AuthResponse:
     """
     AUTH_RESPONSE message (0x02).
 
-    Format: [0x02][IV (16B)][Enc_DK(Nonce_M || Nonce_R) (32B)]
-    Total: 49 bytes
+    Format: [0x02][IV (16B)][Enc_DK(Nonce_M || Nonce_R) (48B)]
+    Total: 65 bytes
+
+    Note: Encrypted nonces are 48 bytes because PKCS7 padding adds a full block
+    when the plaintext (32 bytes = Nonce_M + Nonce_R) is exactly two AES blocks.
     """
     iv: bytes
     encrypted_nonces: bytes  # Nonce_M || Nonce_R encrypted

@@ -160,16 +160,16 @@ class CredentialGATTServer:
 
         logger.info(f"Sending notification ({len(data)} bytes): {data.hex()}")
 
-        # Update characteristic value and notify
-        self.server.get_characteristic(DATA_TRANSFER_CHAR_UUID)
-        self.server.update_value(CREDENTIAL_SERVICE_UUID, DATA_TRANSFER_CHAR_UUID)
+        # Get the characteristic and set its value
+        char = self.server.get_characteristic(DATA_TRANSFER_CHAR_UUID)
+        if char is None:
+            logger.error(f"Characteristic {DATA_TRANSFER_CHAR_UUID} not found")
+            return
 
-        # Set the value and trigger notification
-        await self.server.notify(
-            CREDENTIAL_SERVICE_UUID,
-            DATA_TRANSFER_CHAR_UUID,
-            bytearray(data),
-        )
+        char.value = bytearray(data)
+
+        # Update triggers the notification to subscribed clients
+        self.server.update_value(CREDENTIAL_SERVICE_UUID, DATA_TRANSFER_CHAR_UUID)
 
     async def stop(self) -> None:
         """Stop the GATT server."""

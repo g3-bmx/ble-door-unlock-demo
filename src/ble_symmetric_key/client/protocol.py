@@ -71,8 +71,11 @@ class AuthRequestBuilder:
     """
     Builds AUTH_REQUEST messages.
 
-    Format: [0x01][DeviceID (16B)][IV (16B)][Enc_DK(Nonce_M) (16B)]
-    Total: 49 bytes
+    Format: [0x01][DeviceID (16B)][IV (16B)][Enc_DK(Nonce_M) (32B)]
+    Total: 65 bytes
+
+    Note: Encrypted nonce is 32 bytes because PKCS7 padding adds a full block
+    when the plaintext (16-byte nonce) is exactly one AES block.
     """
     device_id: bytes
     device_key: bytes
@@ -101,10 +104,16 @@ class AuthResponseParser:
     """
     Parses AUTH_RESPONSE messages.
 
-    Format: [0x02][IV (16B)][Enc_DK(Nonce_M || Nonce_R) (32B)]
-    Total: 49 bytes
+    Format: [0x02][IV (16B)][Enc_DK(Nonce_M || Nonce_R) (48B)]
+    Total: 65 bytes
+
+    Note: Encrypted nonces are 48 bytes because PKCS7 padding adds a full block
+    when the plaintext (32 bytes = Nonce_M + Nonce_R) is exactly two AES blocks.
     """
     device_key: bytes
+
+    # Encrypted nonces size: 32-byte plaintext + 16-byte PKCS7 padding = 48 bytes
+    ENCRYPTED_NONCES_SIZE = 48
 
     def parse(self, data: bytes, expected_nonce_m: bytes) -> tuple[bool, Optional[bytes], str]:
         """
@@ -133,13 +142,14 @@ class AuthResponseParser:
         if data[0] != MessageType.AUTH_RESPONSE:
             return False, None, f"Unexpected message type: {data[0]:#x}"
 
-        # Check length: 1 (type) + 16 (IV) + 32 (encrypted nonces) = 49
-        if len(data) < 49:
-            return False, None, f"Response too short: {len(data)} bytes"
+        # Check length: 1 (type) + 16 (IV) + 48 (encrypted nonces) = 65
+        expected_len = 1 + IV_SIZE + self.ENCRYPTED_NONCES_SIZE
+        if len(data) < expected_len:
+            return False, None, f"Response too short: {len(data)} bytes (expected {expected_len})"
 
         # Extract IV and encrypted nonces
-        iv = data[1:17]
-        encrypted_nonces = data[17:49]
+        iv = data[1:1 + IV_SIZE]
+        encrypted_nonces = data[1 + IV_SIZE:1 + IV_SIZE + self.ENCRYPTED_NONCES_SIZE]
 
         # Decrypt
         try:

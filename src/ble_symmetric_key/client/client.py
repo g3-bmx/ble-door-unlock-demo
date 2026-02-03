@@ -29,7 +29,7 @@ CREDENTIAL_SERVICE_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 DATA_TRANSFER_CHAR_UUID = "b2c3d4e5-f678-90ab-cdef-234567890abc"
 
 # Timeouts (seconds)
-SCAN_TIMEOUT = 5.0
+SCAN_TIMEOUT = 30.0  # Extended for better service discovery
 RESPONSE_TIMEOUT = 3.0
 
 

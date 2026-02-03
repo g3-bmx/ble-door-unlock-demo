@@ -117,12 +117,25 @@ class ProtocolHandler:
             logger.warning(f"Unexpected message type {msg_type} in state {session.state}")
             return ErrorMessage(ErrorCode.INVALID_STATE).build()
 
+    def _reset_session(self, session: SessionContext) -> None:
+        """Reset session to initial connected state for a new authentication flow."""
+        session.device_id = None
+        session.device_key = None
+        session.nonce_mobile = None
+        session.nonce_reader = None
+        session.state = ConnectionState.CONNECTED
+        logger.info("Session reset for new connection")
+
     def _handle_auth_request(
         self, session: SessionContext, request: Optional[AuthRequest]
     ) -> bytes:
         """Handle AUTH_REQUEST message."""
-        # Validate state
-        if session.state != ConnectionState.CONNECTED:
+        # Allow AUTH_REQUEST in CONNECTED state, or reset session if in terminal/stale state
+        # This handles reconnections when bless doesn't provide per-client tracking
+        if session.state in (ConnectionState.COMPLETE, ConnectionState.IDLE):
+            logger.info(f"AUTH_REQUEST received in {session.state.name} state, treating as new connection")
+            self._reset_session(session)
+        elif session.state != ConnectionState.CONNECTED:
             logger.warning(f"AUTH_REQUEST in invalid state: {session.state}")
             return ErrorMessage(ErrorCode.INVALID_STATE).build()
 
