@@ -23,6 +23,7 @@ dependencies = [
     { name = "bless", version = "0.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and sys_platform == 'win32'" },
     { name = "bless", version = "0.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or sys_platform != 'win32'" },
     { name = "cryptography" },
+    { name = "dbus-next" },
 ]
 
 [package.optional-dependencies]
@@ -35,6 +36,7 @@ dev = [
 requires-dist = [
     { name = "bless", specifier = ">=0.2.5" },
     { name = "cryptography", specifier = ">=46.0.4" },
+    { name = "dbus-next", specifier = ">=0.2.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
 ]

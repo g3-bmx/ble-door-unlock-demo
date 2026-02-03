@@ -1,0 +1,7 @@
+# BLE GATT Server Dependencies
+
+# BLE GATT server library (cross-platform)
+bless>=0.2.5
+
+# Cryptography for AES-128-CBC and HKDF
+cryptography>=41.0.0
