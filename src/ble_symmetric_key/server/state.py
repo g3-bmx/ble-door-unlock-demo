@@ -8,7 +8,7 @@ States:
 import logging
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Callable, Awaitable
 
 from .crypto import (
     derive_device_key,
@@ -60,14 +60,21 @@ class ProtocolHandler:
     Processes incoming messages and generates responses based on current state.
     """
 
-    def __init__(self, master_key: bytes):
+    def __init__(
+        self,
+        master_key: bytes,
+        async_validator: Optional[Callable[[bytes, bytes], Awaitable[CredentialStatus]]] = None,
+    ):
         """
         Initialize the protocol handler.
 
         Args:
             master_key: The 16-byte master key for deriving device keys
+            async_validator: Optional async function for external credential validation.
+                            Signature: async (credential: bytes, device_id: bytes) -> CredentialStatus
         """
         self.master_key = master_key
+        self.async_validator = async_validator
         self.sessions: dict[str, SessionContext] = {}
 
     def get_session(self, client_id: str) -> SessionContext:
@@ -231,3 +238,74 @@ class ProtocolHandler:
         # POC: Accept all credentials
         logger.info(f"Validating credential: {payload}")
         return CredentialStatus.SUCCESS
+
+    async def handle_message_async(self, client_id: str, data: bytes) -> Optional[bytes]:
+        """
+        Process an incoming message asynchronously and return a response.
+
+        This async version supports external validation via WebSocket.
+
+        Args:
+            client_id: Unique identifier for the connected client
+            data: Raw message bytes
+
+        Returns:
+            Response bytes to send back, or None if no response needed
+        """
+        session = self.get_session(client_id)
+        msg_type, parsed = parse_message(data)
+
+        if msg_type is None:
+            logger.warning(f"Invalid message from {client_id}")
+            return ErrorMessage(ErrorCode.INVALID_MESSAGE).build()
+
+        logger.info(f"Received {msg_type.name} from {client_id} in state {session.state.name}")
+
+        # State machine dispatch
+        if msg_type == MessageType.AUTH_REQUEST:
+            return self._handle_auth_request(session, parsed)
+        elif msg_type == MessageType.CREDENTIAL:
+            return await self._handle_credential_async(session, parsed)
+        else:
+            logger.warning(f"Unexpected message type {msg_type} in state {session.state}")
+            return ErrorMessage(ErrorCode.INVALID_STATE).build()
+
+    async def _handle_credential_async(
+        self, session: SessionContext, credential: Optional[Credential]
+    ) -> bytes:
+        """Handle CREDENTIAL message with async validation support."""
+        # Validate state
+        if session.state != ConnectionState.AUTHENTICATED:
+            logger.warning(f"CREDENTIAL in invalid state: {session.state}")
+            return ErrorMessage(ErrorCode.INVALID_STATE).build()
+
+        if credential is None:
+            logger.warning("Failed to parse CREDENTIAL")
+            return ErrorMessage(ErrorCode.INVALID_MESSAGE).build()
+
+        if session.device_key is None or session.device_id is None:
+            logger.error("No device key or device ID in session")
+            return ErrorMessage(ErrorCode.INVALID_STATE).build()
+
+        session.state = ConnectionState.PROCESSING
+        logger.info("Processing credential")
+
+        # Decrypt the credential payload
+        try:
+            payload = decrypt(session.device_key, credential.iv, credential.encrypted_payload)
+            logger.info(f"Decrypted credential payload ({len(payload)} bytes): {payload.hex()}")
+        except Exception as e:
+            logger.error(f"Credential decryption failed: {e}")
+            session.state = ConnectionState.AUTHENTICATED
+            return ErrorMessage(ErrorCode.DECRYPTION_FAILED).build()
+
+        # Validate credential - use async validator if available
+        if self.async_validator:
+            status = await self.async_validator(payload, session.device_id)
+        else:
+            status = self._validate_credential(payload)
+
+        session.state = ConnectionState.COMPLETE
+        logger.info(f"Credential processing complete, status: {status.name}")
+
+        return CredentialResponse(status=status).build()

@@ -19,6 +19,7 @@ from bless import (
 )
 
 from .state import ProtocolHandler
+from .websocket_server import CredentialValidationServer
 
 logger = logging.getLogger(__name__)
 
@@ -39,25 +40,47 @@ class CredentialGATTServer:
     bidirectional communication using write and notify operations.
     """
 
-    def __init__(self, master_key: bytes, name: str = SERVER_NAME):
+    def __init__(
+        self,
+        master_key: bytes,
+        name: str = SERVER_NAME,
+        enable_websocket: bool = True,
+    ):
         """
         Initialize the GATT server.
 
         Args:
             master_key: 16-byte master key for deriving device keys
             name: Advertised device name
+            enable_websocket: Whether to enable WebSocket validation server
         """
         self.master_key = master_key
         self.name = name
         self.server: Optional[BlessServer] = None
-        self.protocol_handler = ProtocolHandler(master_key)
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+        # WebSocket validation server
+        self.enable_websocket = enable_websocket
+        self.ws_server: Optional[CredentialValidationServer] = None
+
+        if enable_websocket:
+            self.ws_server = CredentialValidationServer()
+            self.protocol_handler = ProtocolHandler(
+                master_key,
+                async_validator=self.ws_server.validate_credential,
+            )
+        else:
+            self.protocol_handler = ProtocolHandler(master_key)
 
     async def start(self) -> None:
         """Start the GATT server and begin advertising."""
         self._loop = asyncio.get_event_loop()
         self._running = True
+
+        # Start WebSocket server first if enabled
+        if self.ws_server:
+            await self.ws_server.start()
 
         logger.info(f"Starting GATT server '{self.name}'")
         logger.info(f"Service UUID: {CREDENTIAL_SERVICE_UUID}")
@@ -145,12 +168,18 @@ class CredentialGATTServer:
         if session.state.name == "IDLE":
             self.protocol_handler.on_connect(client_id)
 
-        # Process the message
-        response = self.protocol_handler.handle_message(client_id, bytes(value))
+        # Process the message asynchronously to support WebSocket validation
+        asyncio.create_task(self._process_message_async(client_id, bytes(value)))
+
+    async def _process_message_async(self, client_id: str, data: bytes) -> None:
+        """Process a message asynchronously and send the response."""
+        if self.enable_websocket:
+            response = await self.protocol_handler.handle_message_async(client_id, data)
+        else:
+            response = self.protocol_handler.handle_message(client_id, data)
 
         if response:
-            # Send response via notification
-            asyncio.create_task(self._send_notification(response))
+            await self._send_notification(response)
 
     async def _send_notification(self, data: bytes) -> None:
         """Send a notification with the given data."""
@@ -172,11 +201,13 @@ class CredentialGATTServer:
         self.server.update_value(CREDENTIAL_SERVICE_UUID, DATA_TRANSFER_CHAR_UUID)
 
     async def stop(self) -> None:
-        """Stop the GATT server."""
+        """Stop the GATT server and WebSocket server."""
         self._running = False
         if self.server:
             await self.server.stop()
             logger.info("GATT server stopped")
+        if self.ws_server:
+            await self.ws_server.stop()
 
     async def run_forever(self) -> None:
         """Run the server until interrupted."""

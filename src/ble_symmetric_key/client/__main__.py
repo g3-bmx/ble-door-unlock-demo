@@ -18,7 +18,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--credential",
         type=str,
-        default="test-credential-12345",
+        default="prod-pin_access_tool-7603498",
         help="Credential string to present (default: test-credential-12345)",
     )
     parser.add_argument(
