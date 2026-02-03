@@ -1,0 +1,7 @@
+# BLE GATT Client Dependencies
+
+# BLE central library (cross-platform)
+bleak>=0.21.0
+
+# Cryptography for AES-128-CBC and HKDF
+cryptography>=41.0.0
