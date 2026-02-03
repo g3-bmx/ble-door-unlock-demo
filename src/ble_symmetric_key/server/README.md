@@ -52,12 +52,14 @@ The design follows the WaveLynx LEAF SDK pattern of using a **single characteris
 │   │                     │              │                     │      │
 │   │  Device ID (16B)    │              │  Master Key (16B)   │      │
 │   │  Device Key (DK)    │              │                     │      │
-│   │                     │              │  Derives DK from:   │      │
-│   │  DK = HKDF(         │              │  DK = HKDF(         │      │
-│   │    MasterKey,       │              │    MasterKey,       │      │
-│   │    DeviceID         │              │    DeviceID         │      │
-│   │  )                  │              │  )                  │      │
 │   │                     │              │                     │      │
+│   │  (DK provisioned    │              │  On AUTH_REQUEST:   │      │
+│   │   to device during  │              │  1. Extract DeviceID│      │
+│   │   enrollment -      │              │  2. Derive DK:      │      │
+│   │   device never      │              │     DK = HKDF(      │      │
+│   │   knows MasterKey)  │              │       MasterKey,    │      │
+│   │                     │              │       DeviceID      │      │
+│   │                     │              │     )               │      │
 │   └─────────┬───────────┘              └──────────┬──────────┘      │
 │             │                                     │                  │
 │             │         BLE Connection              │                  │
@@ -76,7 +78,8 @@ The design follows the WaveLynx LEAF SDK pattern of using a **single characteris
 
 ## Authentication Process
 
-The server implements mutual authentication using a challenge-response protocol. Both parties prove possession of the shared Device Key without transmitting it.
+The server implements mutual authentication using a challenge-response protocol.
+Both parties prove possession of the shared Device Key without transmitting it.
 
 ### Flow Diagram
 
@@ -136,8 +139,8 @@ Mobile (Central)                                    Reader (Peripheral)
 
 | Step | Who Proves What | How |
 |------|-----------------|-----|
-| AUTH_REQUEST | Mobile proves it has DK | Encrypts Nonce_M with DK; only correct DK can produce valid ciphertext |
-| AUTH_RESPONSE | Reader proves it has DK | Includes decrypted Nonce_M in response; mobile verifies it matches |
+| AUTH_REQUEST | Mobile proves it has a valid derived key | Encrypts Nonce_M with DK; only correct DK can produce valid ciphertext |
+| AUTH_RESPONSE | Reader proves it can derive a valid device key | Includes decrypted Nonce_M in response; mobile verifies it matches |
 
 The reader echoing back `Nonce_M` inside the encrypted response proves:
 1. Reader successfully decrypted the AUTH_REQUEST (has correct DK)
